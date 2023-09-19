@@ -67,7 +67,7 @@ export function stringifyFunction(fn: (...args: never) => unknown): string {
  *
  * @example
  *
- * ```ts
+ * ```ts ignore
  * interpolateFunction(() => PLACEHOLDER('test'), {test: 'void 0'});
  * // Equivalent to () => void 0
  * ```

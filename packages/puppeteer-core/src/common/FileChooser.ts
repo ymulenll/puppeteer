@@ -23,20 +23,31 @@ import {assert} from '../util/assert.js';
  * File choosers let you react to the page requesting for a file.
  *
  * @remarks
- * `FileChooser` instances are returned via the {@link Page.waitForFileChooser} method.
+ * `FileChooser` instances are returned via the {@link Page.waitForFileChooser}
+ * method.
  *
- * In browsers, only one file chooser can be opened at a time.
- * All file choosers must be accepted or canceled. Not doing so will prevent
- * subsequent file choosers from appearing.
+ * In browsers, only one file chooser can be opened at a time. All file choosers
+ * must be accepted or canceled. Not doing so will prevent subsequent file
+ * choosers from appearing.
  *
- * @example
+ * @example Uploading a PDF to a file input:
  *
  * ```ts
- * const [fileChooser] = await Promise.all([
+ * import {launch} from 'puppeteer';
+ *
+ * const browser = await launch({headless: 'new'});
+ * const page = await browser.newPage();
+ * await page.goto('data:text/html,<input type="file">');
+ *
+ * // Note we start waiting for the file chooser before clicking.
+ * const [chooser] = await Promise.all([
  *   page.waitForFileChooser(),
- *   page.click('#upload-file-button'), // some button that triggers file selection
+ *   page.click('input[type="file"]'),
  * ]);
- * await fileChooser.accept(['/tmp/myfile.pdf']);
+ *
+ * await chooser.accept(['/tmp/myfile.pdf']);
+ *
+ * browser.close();
  * ```
  *
  * @public

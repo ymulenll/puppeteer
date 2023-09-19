@@ -314,6 +314,9 @@ function* extractExampleCode(
           context = {language: Language.TypeScript, fail, start};
         }
       }
+      if (blocks.length === 0) {
+        continue;
+      }
       // Merging the blocks into a single block.
       yield blocks.reduce(
         (context, {language, code, positions: [position], fail}, index) => {

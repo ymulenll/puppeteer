@@ -60,26 +60,30 @@ export interface PuppeteerLaunchOptions
  * If you're using Puppeteer in a Node environment, this is the class you'll get
  * when you run `require('puppeteer')` (or the equivalent ES `import`).
  *
- * @remarks
- * The most common method to use is {@link PuppeteerNode.launch | launch}, which
+ * @remarks The most common method to use is {@link PuppeteerNode.launch | launch}, which
  * is used to launch and connect to a new browser instance.
  *
  * See {@link Puppeteer | the main Puppeteer class} for methods common to all
  * environments, such as {@link Puppeteer.connect}.
  *
- * @example
- * The following is a typical example of using Puppeteer to drive automation:
+ * @example A typical example of using Puppeteer to drive automation:
  *
  * ```ts
- * import puppeteer from 'puppeteer';
+ * import {launch} from 'puppeteer';
  *
- * (async () => {
- *   const browser = await puppeteer.launch();
- *   const page = await browser.newPage();
- *   await page.goto('https://www.google.com');
- *   // other actions...
- *   await browser.close();
- * })();
+ * // Launch a browser.
+ * const browser = await launch({headless: 'new'});
+ *
+ * // Create a page.
+ * const page = await browser.newPage();
+ *
+ * // Go to a site.
+ * await page.goto('https://www.google.com');
+ *
+ * // Do something with the page...
+ *
+ * // Close the browser.
+ * await browser.close();
  * ```
  *
  * Once you have created a `page` you have access to a large API to interact
@@ -143,26 +147,14 @@ export class PuppeteerNode extends Puppeteer {
   }
 
   /**
-   * Launches a browser instance with given arguments and options when
-   * specified.
+   * Launches a {@link Browser | browser} with the given options.
    *
-   * When using with `puppeteer-core`,
-   * {@link LaunchOptions | options.executablePath} or
-   * {@link LaunchOptions | options.channel} must be provided.
+   * When using with `puppeteer-core`, an
+   * {@link LaunchOptions.executablePath | executable path} or
+   * {@link LaunchOptions.channel | channel} must be provided.
    *
-   * @example
-   * You can use {@link LaunchOptions | options.ignoreDefaultArgs}
-   * to filter out `--mute-audio` from default arguments:
-   *
-   * ```ts
-   * const browser = await puppeteer.launch({
-   *   ignoreDefaultArgs: ['--mute-audio'],
-   * });
-   * ```
-   *
-   * @remarks
-   * Puppeteer can also be used to control the Chrome browser, but it works best
-   * with the version of Chrome for Testing downloaded by default.
+   * @remarks Puppeteer can also be used to control the Chrome browser, but it
+   * works best with the version of Chrome for Testing downloaded by default.
    * There is no guarantee it will work with any other version. If Google Chrome
    * (rather than Chrome for Testing) is preferred, a
    * {@link https://www.google.com/chrome/browser/canary.html | Chrome Canary}
@@ -175,6 +167,19 @@ export class PuppeteerNode extends Puppeteer {
    * describes some differences for Linux users. See
    * {@link https://goo.gle/chrome-for-testing | this doc} for the description
    * of Chrome for Testing.
+   *
+   * @example Using {@link LaunchOptions.ignoreDefaultArgs} to filter out
+   * `--mute-audio` from default arguments:
+   *
+   * ```ts
+   * import {launch} from 'puppeteer';
+   *
+   * const browser = await launch({
+   *   headless: 'new',
+   *   ignoreDefaultArgs: ['--mute-audio'],
+   * });
+   * browser.close();
+   * ```
    *
    * @param options - Options to configure launching behavior.
    */

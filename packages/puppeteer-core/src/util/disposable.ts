@@ -127,7 +127,7 @@ export class DisposableStack {
    *
    * @example
    *
-   * ```ts
+   * ```ts ignore
    * class C {
    *   #res1: Disposable;
    *   #res2: Disposable;

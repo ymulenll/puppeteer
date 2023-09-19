@@ -482,46 +482,42 @@ export interface NewDocumentScriptEvaluation {
  * {@link https://developer.chrome.com/extensions/background_pages | extension background page}
  * in the browser.
  *
- * :::note
- *
- * One Browser instance might have multiple Page instances.
- *
- * :::
- *
- * @example
- * This example creates a page, navigates it to a URL, and then saves a screenshot:
- *
- * ```ts
- * import puppeteer from 'puppeteer';
- *
- * (async () => {
- *   const browser = await puppeteer.launch();
- *   const page = await browser.newPage();
- *   await page.goto('https://example.com');
- *   await page.screenshot({path: 'screenshot.png'});
- *   await browser.close();
- * })();
- * ```
- *
  * The Page class extends from Puppeteer's {@link EventEmitter} class and will
  * emit various events which are documented in the {@link PageEvent} enum.
  *
- * @example
- * This example logs a message for a single page `load` event:
+ * @example Screenshotting example.com:
  *
  * ```ts
- * page.once('load', () => console.log('Page loaded!'));
+ * import {launch} from 'puppeteer';
+ *
+ * const browser = await launch();
+ * const page = await browser.newPage();
+ *
+ * await page.goto('https://example.com');
+ * await page.screenshot({path: '/tmp/screenshot.png'});
+ *
+ * browser.close();
  * ```
  *
- * To unsubscribe from events use the {@link EventEmitter.off} method:
+ * @example Log a message {@link EventEmitter.on | when} the
+ * {@link PageEvent.Load | page loads}:
  *
  * ```ts
- * function logRequest(interceptedRequest) {
- *   console.log('A request was made:', interceptedRequest.url());
- * }
- * page.on('request', logRequest);
- * // Sometime later...
- * page.off('request', logRequest);
+ * import {launch} from 'puppeteer';
+ *
+ * const browser = await launch();
+ * const page = await browser.newPage();
+ *
+ * const handler = () => console.log('Page loaded!');
+ * page.on('load', handler);
+ * ```
+ *
+ * To unsubscribe from events, use {@link EventEmitter.off}:
+ *
+ * ```ts
+ * page.off('load', handler);
+ *
+ * await browser.close();
  * ```
  *
  * @public
