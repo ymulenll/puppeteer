@@ -14,12 +14,11 @@
  * limitations under the License.
  */
 
-import type {ChildProcessWithoutNullStreams} from 'child_process';
-import {spawn, spawnSync} from 'child_process';
 import {PassThrough} from 'stream';
 
 import debug from 'debug';
 import type Protocol from 'devtools-protocol';
+import Worker from 'web-worker';
 
 import type {
   Observable,
@@ -65,10 +64,10 @@ export interface ScreenRecorderOptions {
 export class ScreenRecorder extends PassThrough {
   #page: Page;
 
-  #process: ChildProcessWithoutNullStreams;
+  #worker: Worker;
 
   #controller = new AbortController();
-  #lastFrame: Promise<readonly [Buffer, number]>;
+  #lastFrame: Promise<readonly [Uint8Array, number]>;
 
   /**
    * @internal
@@ -77,66 +76,88 @@ export class ScreenRecorder extends PassThrough {
     page: Page,
     width: number,
     height: number,
-    {speed, scale, crop, format, path}: ScreenRecorderOptions = {}
+    {speed, scale, crop, format}: ScreenRecorderOptions = {}
   ) {
     super({allowHalfOpen: false});
 
-    path ??= 'ffmpeg';
-
-    // Tests if `ffmpeg` exists.
-    const {error} = spawnSync(path);
-    if (error) {
-      throw error;
-    }
-
-    this.#process = spawn(
-      path,
-      // See https://trac.ffmpeg.org/wiki/Encode/VP9 for more information on flags.
-      [
-        ['-loglevel', 'error'],
-        // Reduces general buffering.
-        ['-avioflags', 'direct'],
-        // Reduces initial buffering while analyzing input fps and other stats.
-        [
-          '-fpsprobesize',
-          `${0}`,
-          '-probesize',
-          `${32}`,
-          '-analyzeduration',
-          `${0}`,
-          '-fflags',
-          'nobuffer',
-        ],
-        // Forces input to be read from standard input, and forces png input
-        // image format.
-        ['-f', 'image2pipe', '-c:v', 'png', '-i', 'pipe:0'],
-        // Overwrite output and no audio.
-        ['-y', '-an'],
-        // This drastically reduces stalling when cpu is overbooked. By default
-        // VP9 tries to use all available threads?
-        ['-threads', '1'],
-        // Specifies the frame rate we are giving ffmpeg.
-        ['-framerate', `${DEFAULT_FPS}`],
-        // Specifies the encoding and format we are using.
-        this.#getFormatArgs(format ?? 'webm'),
-        // Disable bitrate.
-        ['-b:v', `${0}`],
-        // Filters to ensure the images are piped correctly.
-        [
-          '-vf',
-          `${
-            speed ? `setpts=${1 / speed}*PTS,` : ''
-          }crop='min(${width},iw):min(${height},ih):${0}:${0}',pad=${width}:${height}:${0}:${0}${
-            crop ? `,crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}` : ''
-          }${scale ? `,scale=iw*${scale}:-1` : ''}`,
-        ],
-        'pipe:1',
-      ].flat(),
-      {stdio: ['pipe', 'pipe', 'pipe']}
+    this.#worker = new Worker(
+      '/Users/jrandolf/Sources/puppeteer/node_modules/ffmpeg.js/ffmpeg-worker-webm.js'
     );
-    this.#process.stdout.pipe(this);
-    this.#process.stderr.on('data', (data: Buffer) => {
-      debugFfmpeg(data.toString('utf8'));
+    this.#worker.addEventListener(
+      'message',
+      event => {
+        const msg = event.data;
+        switch (msg.type) {
+          case 'ready':
+            this.#worker.postMessage({
+              type: 'run',
+              arguments:
+                // See https://trac.ffmpeg.org/wiki/Encode/VP9 for more information on flags.
+                [
+                  ['-loglevel', 'error'],
+                  // Reduces general buffering.
+                  ['-avioflags', 'direct'],
+                  // Reduces initial buffering while analyzing input fps and other stats.
+                  [
+                    '-fpsprobesize',
+                    `${0}`,
+                    '-probesize',
+                    `${32}`,
+                    '-analyzeduration',
+                    `${0}`,
+                    '-fflags',
+                    'nobuffer',
+                  ],
+                  // Forces input to be read from standard input, and forces png input
+                  // image format.
+                  ['-f', 'image2pipe', '-c:v', 'png', '-i', 'pipe:0'],
+                  // Overwrite output and no audio.
+                  ['-y', '-an'],
+                  // This drastically reduces stalling when cpu is overbooked. By default
+                  // VP9 tries to use all available threads?
+                  ['-threads', '1'],
+                  // Specifies the frame rate we are giving ffmpeg.
+                  ['-framerate', `${DEFAULT_FPS}`],
+                  // Specifies the encoding and format we are using.
+                  this.#getFormatArgs(format ?? 'webm'),
+                  // Disable bitrate.
+                  ['-b:v', `${0}`],
+                  // Filters to ensure the images are piped correctly.
+                  [
+                    '-vf',
+                    `${
+                      speed ? `setpts=${1 / speed}*PTS,` : ''
+                    }crop='min(${width},iw):min(${height},ih):${0}:${0}',pad=${width}:${height}:${0}:${0}${
+                      crop
+                        ? `,crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`
+                        : ''
+                    }${scale ? `,scale=iw*${scale}:-1` : ''}`,
+                  ],
+                  'pipe:1',
+                ].flat(),
+            });
+            break;
+        }
+      },
+      {once: true}
+    );
+    this.#worker.addEventListener('message', event => {
+      const msg = event.data;
+      switch (msg.type) {
+        case 'stdout':
+          this.write(msg.data);
+          break;
+        case 'exit':
+          this.end();
+      }
+    });
+    this.#worker.addEventListener('message', event => {
+      const msg = event.data;
+      switch (msg.type) {
+        case 'stderr':
+          debugFfmpeg(msg.data.toString('utf8'));
+          break;
+      }
     });
 
     this.#page = page;
@@ -221,13 +242,8 @@ export class ScreenRecorder extends PassThrough {
   }
 
   @guarded()
-  async #writeFrame(buffer: Buffer) {
-    const error = await new Promise<Error | null | undefined>(resolve => {
-      this.#process.stdin.write(buffer, resolve);
-    });
-    if (error) {
-      console.log(`ffmpeg failed to write: ${error.message}.`);
-    }
+  async #writeFrame(buffer: Uint8Array) {
+    this.#worker.postMessage({type: 'stdin', data: buffer}, [buffer]);
   }
 
   /**
@@ -248,7 +264,7 @@ export class ScreenRecorder extends PassThrough {
     // Repeat the last frame for the remaining frames.
     const [buffer, timestamp] = await this.#lastFrame;
     await Promise.all(
-      Array<Buffer>(
+      Array(
         Math.max(
           1,
           Math.round((DEFAULT_FPS * (performance.now() - timestamp)) / 1000)
@@ -259,10 +275,11 @@ export class ScreenRecorder extends PassThrough {
     );
 
     // Close stdin to notify FFmpeg we are done.
-    this.#process.stdin.end();
+    this.#worker.postMessage({type: 'stdin', data: null});
     await new Promise(resolve => {
-      this.#process.once('close', resolve);
+      this.#worker.addEventListener('exit', resolve, {once: true});
     });
+    this.#worker.terminate();
   }
 
   /**
