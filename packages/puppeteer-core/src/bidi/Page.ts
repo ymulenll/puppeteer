@@ -477,6 +477,11 @@ export class BidiPage extends Page {
   }
 
   override async close(options?: {runBeforeUnload?: boolean}): Promise<void> {
+    assert(
+      !this.#connection.closed,
+      'Protocol error: Connection closed. Most likely the page has been closed.'
+    );
+
     if (this.#closedDeferred.finished()) {
       return;
     }
