@@ -259,10 +259,6 @@ export class BidiPage extends Page {
     }) as BidiJSHandle<Prototype[]>;
   }
 
-  _setBrowserContext(browserContext: BidiBrowserContext): void {
-    this.#browserContext = browserContext;
-  }
-
   override get accessibility(): Accessibility {
     return this.#accessibility;
   }

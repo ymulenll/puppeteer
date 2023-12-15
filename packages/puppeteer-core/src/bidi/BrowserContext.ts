@@ -21,11 +21,15 @@ import {BrowserContext} from '../api/BrowserContext.js';
 import type {Page} from '../api/Page.js';
 import type {Target} from '../api/Target.js';
 import {UnsupportedOperation} from '../common/Errors.js';
+import {debugError} from '../common/util.js';
 import type {Viewport} from '../common/Viewport.js';
+import {assert} from '../util/assert.js';
 
 import type {BidiBrowser} from './Browser.js';
+import type {BrowsingContext} from './BrowsingContext.js';
 import type {BidiConnection} from './Connection.js';
 import type {BidiPage} from './Page.js';
+import {BiDiBrowsingContextTarget, BiDiPageTarget} from './Target.js';
 
 /**
  * @internal
@@ -40,16 +44,33 @@ export interface BidiBrowserContextOptions {
  */
 export class BidiBrowserContext extends BrowserContext {
   #browser: BidiBrowser;
-  #connection: BidiConnection;
   #defaultViewport: Viewport | null;
   #isDefault = false;
+  #targets = new Map<
+    Bidi.BrowsingContext.BrowsingContext,
+    BiDiBrowsingContextTarget
+  >();
 
   constructor(browser: BidiBrowser, options: BidiBrowserContextOptions) {
     super();
     this.#browser = browser;
-    this.#connection = this.#browser.connection;
     this.#defaultViewport = options.defaultViewport;
     this.#isDefault = options.isDefault;
+
+    // TODO: Use event subscription.
+    this.connection.on('browsingContext.contextDestroyed', info => {
+      this.#targets.delete(info.context);
+    });
+
+    this.#browser._browserContexts.push(this);
+  }
+
+  get connection(): BidiConnection {
+    return this.#browser.connection;
+  }
+
+  browsingContext(id: string): BrowsingContext | undefined {
+    return this.#browser.browsingContext(id);
   }
 
   override targets(): Target[] {
@@ -67,44 +88,37 @@ export class BidiBrowserContext extends BrowserContext {
     }, options);
   }
 
-  get connection(): BidiConnection {
-    return this.#connection;
-  }
-
   override async newPage(): Promise<Page> {
-    const {result} = await this.#connection.send('browsingContext.create', {
-      type: Bidi.BrowsingContext.CreateType.Tab,
-    });
-    const target = this.#browser._getTargetById(result.context);
+    const {result} = await this.#browser.connection.send(
+      'browsingContext.create',
+      {
+        type: Bidi.BrowsingContext.CreateType.Tab,
+      }
+    );
+    const context = this.#browser.browsingContext(result.context);
+    assert(
+      context,
+      'BiDi implementation is broken; context should already be created'
+    );
 
-    // TODO: once BiDi has some concept matching BrowserContext, the newly
-    // created contexts should get automatically assigned to the right
-    // BrowserContext. For now, we assume that only explicitly created pages go
-    // to the current BrowserContext. Otherwise, the contexts get assigned to
-    // the default BrowserContext by the Browser.
-    target._setBrowserContext(this);
+    const target = !context.parent
+      ? new BiDiPageTarget(this, context)
+      : new BiDiBrowsingContextTarget(this, context);
+    this.#targets.set(context.id, target);
 
     const page = await target.page();
     if (!page) {
       throw new Error('Page is not found');
     }
     if (this.#defaultViewport) {
-      try {
-        await page.setViewport(this.#defaultViewport);
-      } catch {
-        // No support for setViewport in Firefox.
-      }
+      await page.setViewport(this.#defaultViewport).catch(debugError);
     }
 
     return page;
   }
 
   override async close(): Promise<void> {
-    if (this.#isDefault) {
-      throw new Error('Default context cannot be closed!');
-    }
-
-    await this.#browser._closeContext(this);
+    this[Symbol.dispose]();
   }
 
   override browser(): BidiBrowser {
@@ -132,5 +146,20 @@ export class BidiBrowserContext extends BrowserContext {
 
   override clearPermissionOverrides(): never {
     throw new UnsupportedOperation();
+  }
+
+  [Symbol.dispose](): void {
+    // TODO: Implement disposed flag.
+    if (this.#isDefault) {
+      throw new Error('Default context cannot be closed!');
+    }
+    const index = this.#browser._browserContexts.findIndex(candidate => {
+      return candidate === this;
+    });
+    assert(index >= 0);
+    this.#browser._browserContexts.splice(index, 1);
+    for (const target of this.#targets.values()) {
+      target[Symbol.dispose]();
+    }
   }
 }

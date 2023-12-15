@@ -162,7 +162,6 @@ export class BidiConnection extends EventEmitter<BidiEvents> {
   #timeout? = 0;
   #closed = false;
   #callbacks = new CallbackRegistry();
-  #browsingContexts = new Map<string, BrowsingContext>();
 
   constructor(
     url: string,
@@ -274,37 +273,6 @@ export class BidiConnection extends EventEmitter<BidiEvents> {
     context?.emit(event.method, event.params);
   }
 
-  registerBrowsingContexts(context: BrowsingContext): void {
-    this.#browsingContexts.set(context.id, context);
-  }
-
-  getBrowsingContext(contextId: string): BrowsingContext {
-    const currentContext = this.#browsingContexts.get(contextId);
-    if (!currentContext) {
-      throw new Error(`BrowsingContext ${contextId} does not exist.`);
-    }
-    return currentContext;
-  }
-
-  getTopLevelContext(contextId: string): BrowsingContext {
-    let currentContext = this.#browsingContexts.get(contextId);
-    if (!currentContext) {
-      throw new Error(`BrowsingContext ${contextId} does not exist.`);
-    }
-    while (currentContext.parent) {
-      contextId = currentContext.parent;
-      currentContext = this.#browsingContexts.get(contextId);
-      if (!currentContext) {
-        throw new Error(`BrowsingContext ${contextId} does not exist.`);
-      }
-    }
-    return currentContext;
-  }
-
-  unregisterBrowsingContexts(id: string): void {
-    this.#browsingContexts.delete(id);
-  }
-
   /**
    * Unbinds the connection, but keeps the transport open. Useful when the transport will
    * be reused by other connection e.g. with different protocol.
@@ -319,7 +287,6 @@ export class BidiConnection extends EventEmitter<BidiEvents> {
     this.#transport.onmessage = () => {};
     this.#transport.onclose = () => {};
 
-    this.#browsingContexts.clear();
     this.#callbacks.clear();
   }
 

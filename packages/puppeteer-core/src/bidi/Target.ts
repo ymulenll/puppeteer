@@ -14,9 +14,16 @@
  * limitations under the License.
  */
 
+import type * as Bidi from 'chromium-bidi/lib/cjs/protocol/protocol.js';
+
+import {BrowserEvent} from '../api/Browser.js';
+import {BrowserContextEvent} from '../api/BrowserContext.js';
 import type {CDPSession} from '../api/CDPSession.js';
 import {Target, TargetType} from '../api/Target.js';
 import {UnsupportedOperation} from '../common/Errors.js';
+import {EventSubscription} from '../common/EventEmitter.js';
+import {debugError} from '../common/util.js';
+import {DisposableStack, disposeSymbol} from '../util/disposable.js';
 
 import type {BidiBrowser} from './Browser.js';
 import type {BidiBrowserContext} from './BrowserContext.js';
@@ -31,10 +38,6 @@ export abstract class BidiTarget extends Target {
 
   constructor(browserContext: BidiBrowserContext) {
     super();
-    this._browserContext = browserContext;
-  }
-
-  _setBrowserContext(browserContext: BidiBrowserContext): void {
     this._browserContext = browserContext;
   }
 
@@ -76,7 +79,8 @@ export class BiDiBrowserTarget extends BidiTarget {
  * @internal
  */
 export class BiDiBrowsingContextTarget extends BidiTarget {
-  protected _browsingContext: BrowsingContext;
+  readonly browsingContext: BrowsingContext;
+  readonly #disposables = new DisposableStack();
 
   constructor(
     browserContext: BidiBrowserContext,
@@ -84,26 +88,84 @@ export class BiDiBrowsingContextTarget extends BidiTarget {
   ) {
     super(browserContext);
 
-    this._browsingContext = browsingContext;
+    this.browsingContext = browsingContext;
+
+    this.#disposables.use(
+      new EventSubscription(
+        this.browsingContext.connection,
+        'browsingContext.domContentLoaded',
+        (info: Bidi.BrowsingContext.NavigationInfo) => {
+          if (info.context === this.browsingContext.id) {
+            this.browser().emit(BrowserEvent.TargetChanged, this);
+          }
+        }
+      )
+    );
+    this.#disposables.use(
+      new EventSubscription(
+        this.browsingContext.connection,
+        'browsingContext.navigationStarted',
+        (info: Bidi.BrowsingContext.NavigationInfo) => {
+          if (info.context === this.browsingContext.id) {
+            this.browser().emit(BrowserEvent.TargetChanged, this);
+            this.browserContext().emit(BrowserContextEvent.TargetChanged, this);
+          }
+        }
+      )
+    );
+    this.#disposables.use(
+      new EventSubscription(
+        this.browsingContext.connection,
+        'browsingContext.fragmentNavigated',
+        (info: Bidi.BrowsingContext.NavigationInfo) => {
+          if (info.context === this.browsingContext.id) {
+            this.browser().emit(BrowserEvent.TargetChanged, this);
+            this.browserContext().emit(BrowserContextEvent.TargetChanged, this);
+          }
+        }
+      )
+    );
+
+    this.browsingContext.connection.onceIf(
+      'browsingContext.contextDestroyed',
+      info => {
+        return info.context === this.browsingContext.id;
+      },
+      this[Symbol.dispose]
+    );
+  }
+
+  get disposed(): boolean {
+    return this.#disposables.disposed;
   }
 
   override url(): string {
-    return this._browsingContext.url;
+    return this.browsingContext.url;
   }
 
   override async createCDPSession(): Promise<CDPSession> {
-    const {sessionId} = await this._browsingContext.cdpSession.send(
+    const {sessionId} = await this.browsingContext.cdpSession.send(
       'Target.attachToTarget',
       {
-        targetId: this._browsingContext.id,
+        targetId: this.browsingContext.id,
         flatten: true,
       }
     );
-    return new CdpSessionWrapper(this._browsingContext, sessionId);
+    return new CdpSessionWrapper(this.browsingContext, sessionId);
   }
 
   override type(): TargetType {
     return TargetType.PAGE;
+  }
+
+  [disposeSymbol](): void {
+    if (this.disposed) {
+      return;
+    }
+    this.#disposables.dispose();
+    this.browsingContext[Symbol.dispose]();
+    this.browser().emit(BrowserEvent.TargetDestroyed, this);
+    this._browserContext.emit(BrowserContextEvent.TargetDestroyed, this);
   }
 }
 
@@ -126,8 +188,8 @@ export class BiDiPageTarget extends BiDiBrowsingContextTarget {
     return this.#page;
   }
 
-  override _setBrowserContext(browserContext: BidiBrowserContext): void {
-    super._setBrowserContext(browserContext);
-    this.#page._setBrowserContext(browserContext);
+  override [Symbol.dispose](): void {
+    void this.#page.close().catch(debugError);
+    super[Symbol.dispose]();
   }
 }

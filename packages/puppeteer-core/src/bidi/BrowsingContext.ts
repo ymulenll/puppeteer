@@ -4,12 +4,18 @@ import type ProtocolMapping from 'devtools-protocol/types/protocol-mapping.js';
 import {CDPSession} from '../api/CDPSession.js';
 import type {Connection as CdpConnection} from '../cdp/Connection.js';
 import {TargetCloseError, UnsupportedOperation} from '../common/Errors.js';
-import type {EventType} from '../common/EventEmitter.js';
+import {
+  EventEmitter,
+  EventSubscription,
+  type EventType,
+} from '../common/EventEmitter.js';
 import {debugError} from '../common/util.js';
+import {assert} from '../util/assert.js';
 import {Deferred} from '../util/Deferred.js';
+import {DisposableStack} from '../util/disposable.js';
 
+import type {BidiBrowser} from './Browser.js';
 import type {BidiConnection} from './Connection.js';
-import {BidiRealm} from './Realm.js';
 
 /**
  * @internal
@@ -27,7 +33,7 @@ export class CdpSessionWrapper extends CDPSession {
   constructor(context: BrowsingContext, sessionId?: string) {
     super();
     this.#context = context;
-    if (!this.#context.supportsCdp()) {
+    if (!this.#context.browser.supportsCdp()) {
       return;
     }
     if (sessionId) {
@@ -56,7 +62,7 @@ export class CdpSessionWrapper extends CDPSession {
     method: T,
     ...paramArgs: ProtocolMapping.Commands[T]['paramsType']
   ): Promise<ProtocolMapping.Commands[T]['returnType']> {
-    if (!this.#context.supportsCdp()) {
+    if (!this.#context.browser.supportsCdp()) {
       throw new UnsupportedOperation(
         'CDP support is required for this feature. The current browser does not support CDP.'
       );
@@ -77,7 +83,7 @@ export class CdpSessionWrapper extends CDPSession {
 
   override async detach(): Promise<void> {
     cdpSessions.delete(this.id());
-    if (!this.#detached && this.#context.supportsCdp()) {
+    if (!this.#detached && this.#context.browser.supportsCdp()) {
       await this.#context.cdpSession.send('Target.detachFromTarget', {
         sessionId: this.id(),
       });
@@ -120,68 +126,93 @@ export interface BrowsingContextEvents extends Record<EventType, unknown> {
 /**
  * @internal
  */
-export class BrowsingContext extends BidiRealm {
-  #id: string;
-  #url: string;
-  #cdpSession: CDPSession;
-  #parent?: string | null;
-  #browserName = '';
+export class BrowsingContext extends EventEmitter<BrowsingContextEvents> {
+  readonly browser: BidiBrowser;
+  readonly #info: Bidi.BrowsingContext.Info;
+  readonly #cdpSession: CDPSession;
+  readonly #disposables = new DisposableStack();
 
-  constructor(
-    connection: BidiConnection,
-    info: Bidi.BrowsingContext.Info,
-    browserName: string
-  ) {
-    super(connection);
-    this.#id = info.context;
-    this.#url = info.url;
-    this.#parent = info.parent;
-    this.#browserName = browserName;
+  constructor(browser: BidiBrowser, info: Bidi.BrowsingContext.Info) {
+    super();
+
+    this.browser = browser;
+    this.#info = info;
     this.#cdpSession = new CdpSessionWrapper(this, undefined);
 
-    this.on('browsingContext.domContentLoaded', this.#updateUrl.bind(this));
-    this.on('browsingContext.fragmentNavigated', this.#updateUrl.bind(this));
-    this.on('browsingContext.load', this.#updateUrl.bind(this));
+    this.#disposables.use(
+      new EventSubscription(
+        this.connection,
+        'browsingContext.domContentLoaded',
+        this.#updateUrl.bind(this)
+      )
+    );
+    this.#disposables.use(
+      new EventSubscription(
+        this.connection,
+        'browsingContext.fragmentNavigated',
+        this.#updateUrl.bind(this)
+      )
+    );
+    this.#disposables.use(
+      new EventSubscription(
+        this.connection,
+        'browsingContext.load',
+        this.#updateUrl.bind(this)
+      )
+    );
+
+    const {top: topContext} = this;
+    if (this !== topContext) {
+      topContext.emit(BrowsingContextEvent.Created, this);
+    }
   }
 
-  supportsCdp(): boolean {
-    return !this.#browserName.toLowerCase().includes('firefox');
+  get connection(): BidiConnection {
+    return this.browser.connection;
   }
 
   #updateUrl(info: Bidi.BrowsingContext.NavigationInfo) {
-    this.#url = info.url;
-  }
-
-  createRealmForSandbox(): BidiRealm {
-    return new BidiRealm(this.connection);
+    this.#info.url = info.url;
   }
 
   get url(): string {
-    return this.#url;
+    return this.#info.url;
   }
 
   get id(): string {
-    return this.#id;
+    return this.#info.context;
   }
 
-  get parent(): string | undefined | null {
-    return this.#parent;
+  get parent(): BrowsingContext | undefined {
+    if (!this.#info.parent) {
+      return;
+    }
+    const parent = this.browser.browsingContext(this.#info.parent);
+    assert(
+      parent,
+      'If this errors, then the parent was somehow destroyed before the children; this should be impossible.'
+    );
+    return parent;
+  }
+
+  get top(): BrowsingContext {
+    let top = this as BrowsingContext;
+    for (let {parent} = top; parent; {parent} = top) {
+      top = parent;
+    }
+    return top;
   }
 
   get cdpSession(): CDPSession {
     return this.#cdpSession;
   }
 
-  async sendCdpCommand<T extends keyof ProtocolMapping.Commands>(
-    method: T,
-    ...paramArgs: ProtocolMapping.Commands[T]['paramsType']
-  ): Promise<ProtocolMapping.Commands[T]['returnType']> {
-    return await this.#cdpSession.send(method, ...paramArgs);
-  }
-
-  dispose(): void {
-    this.removeAllListeners();
-    this.connection.unregisterBrowsingContexts(this.#id);
+  [Symbol.dispose](): void {
+    if (this.#disposables.disposed) {
+      return;
+    }
+    this.#disposables.dispose();
     void this.#cdpSession.detach().catch(debugError);
+    this.top.emit(BrowsingContextEvent.Destroyed, this);
   }
 }
