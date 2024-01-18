@@ -31,7 +31,7 @@ import {fromEmitterEvent, timeout, UTILITY_WORLD_NAME} from '../common/util.js';
 import {Deferred} from '../util/Deferred.js';
 import {disposeSymbol} from '../util/disposable.js';
 
-import type {BrowsingContext} from './BrowsingContext.js';
+import type {BrowsingContext} from './core/BrowsingContext.js';
 import {ExposeableFunction} from './ExposedFunction.js';
 import type {BidiHTTPResponse} from './HTTPResponse.js';
 import {

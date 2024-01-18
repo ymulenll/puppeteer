@@ -11,22 +11,18 @@ import {UnsupportedOperation} from '../common/Errors.js';
 
 import type {BidiBrowser} from './Browser.js';
 import type {BidiBrowserContext} from './BrowserContext.js';
-import {type BrowsingContext, CdpSessionWrapper} from './BrowsingContext.js';
+import type {BrowsingContext} from './core/BrowsingContext.js';
 import {BidiPage} from './Page.js';
 
 /**
  * @internal
  */
 export abstract class BidiTarget extends Target {
-  protected _browserContext: BidiBrowserContext;
+  readonly #browserContext: BidiBrowserContext;
 
   constructor(browserContext: BidiBrowserContext) {
     super();
-    this._browserContext = browserContext;
-  }
-
-  _setBrowserContext(browserContext: BidiBrowserContext): void {
-    this._browserContext = browserContext;
+    this.#browserContext = browserContext;
   }
 
   override asPage(): Promise<Page> {
@@ -34,11 +30,11 @@ export abstract class BidiTarget extends Target {
   }
 
   override browser(): BidiBrowser {
-    return this._browserContext.browser();
+    return this.#browserContext.browser();
   }
 
   override browserContext(): BidiBrowserContext {
-    return this._browserContext;
+    return this.#browserContext;
   }
 
   override opener(): never {
@@ -67,7 +63,7 @@ export class BiDiBrowserTarget extends BidiTarget {
  * @internal
  */
 export class BiDiBrowsingContextTarget extends BidiTarget {
-  protected _browsingContext: BrowsingContext;
+  #browsingContext: BrowsingContext;
 
   constructor(
     browserContext: BidiBrowserContext,
@@ -75,22 +71,22 @@ export class BiDiBrowsingContextTarget extends BidiTarget {
   ) {
     super(browserContext);
 
-    this._browsingContext = browsingContext;
+    this.#browsingContext = browsingContext;
   }
 
   override url(): string {
-    return this._browsingContext.url;
+    return this.#browsingContext.url;
   }
 
   override async createCDPSession(): Promise<CDPSession> {
-    const {sessionId} = await this._browsingContext.cdpSession.send(
-      'Target.attachToTarget',
-      {
-        targetId: this._browsingContext.id,
-        flatten: true,
-      }
-    );
-    return new CdpSessionWrapper(this._browsingContext, sessionId);
+    // const {sessionId} = await this._browsingContext.cdpSession.send(
+    //   'Target.attachToTarget',
+    //   {
+    //     targetId: this._browsingContext.id,
+    //     flatten: true,
+    //   }
+    // );
+    // return new CdpSessionWrapper(this._browsingContext, sessionId);
   }
 
   override type(): TargetType {
@@ -102,7 +98,7 @@ export class BiDiBrowsingContextTarget extends BidiTarget {
  * @internal
  */
 export class BiDiPageTarget extends BiDiBrowsingContextTarget {
-  #page: BidiPage;
+  readonly bidiPage: BidiPage;
 
   constructor(
     browserContext: BidiBrowserContext,
@@ -110,15 +106,10 @@ export class BiDiPageTarget extends BiDiBrowsingContextTarget {
   ) {
     super(browserContext, browsingContext);
 
-    this.#page = new BidiPage(browsingContext, browserContext, this);
+    this.bidiPage = new BidiPage(this, browsingContext);
   }
 
   override async page(): Promise<BidiPage> {
-    return this.#page;
-  }
-
-  override _setBrowserContext(browserContext: BidiBrowserContext): void {
-    super._setBrowserContext(browserContext);
-    this.#page._setBrowserContext(browserContext);
+    return this.bidiPage;
   }
 }

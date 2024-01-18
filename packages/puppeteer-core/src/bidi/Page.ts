@@ -61,11 +61,6 @@ import {isErrorLike} from '../util/ErrorLike.js';
 
 import type {BidiBrowser} from './Browser.js';
 import type {BidiBrowserContext} from './BrowserContext.js';
-import {
-  BrowsingContextEvent,
-  CdpSessionWrapper,
-  type BrowsingContext,
-} from './BrowsingContext.js';
 import type {BidiConnection} from './Connection.js';
 import {BidiDeserializer} from './Deserializer.js';
 import {BidiDialog} from './Dialog.js';
@@ -81,6 +76,7 @@ import {getBiDiReadinessState, rewriteNavigationError} from './lifecycle.js';
 import {BidiNetworkManager} from './NetworkManager.js';
 import {createBidiHandle} from './Realm.js';
 import type {BiDiPageTarget} from './Target.js';
+import type {BrowsingContext} from './core/BrowsingContext.js';
 
 /**
  * @internal
@@ -150,21 +146,15 @@ export class BidiPage extends Page {
   #touchscreen: BidiTouchscreen;
   #keyboard: BidiKeyboard;
   #browsingContext: BrowsingContext;
-  #browserContext: BidiBrowserContext;
   #target: BiDiPageTarget;
 
   _client(): CDPSession {
     return this.mainFrame().context().cdpSession;
   }
 
-  constructor(
-    browsingContext: BrowsingContext,
-    browserContext: BidiBrowserContext,
-    target: BiDiPageTarget
-  ) {
+  constructor(target: BiDiPageTarget, browsingContext: BrowsingContext) {
     super();
     this.#browsingContext = browsingContext;
-    this.#browserContext = browserContext;
     this.#target = target;
     this.#connection = browsingContext.connection;
 

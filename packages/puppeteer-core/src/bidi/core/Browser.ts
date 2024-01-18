@@ -136,15 +136,22 @@ export class Browser extends EventEmitter<{
     return this.#userContexts.values();
   }
 
+  dispose(reason?: string): void {
+    if (this.disposed) {
+      return;
+    }
+    this.#reason = reason ?? `Browser was disposed.`;
+    this.emit('closed', {reason: this.#reason});
+    this.removeAllListeners();
+  }
+
   @throwIfDisposed((browser: Browser) => {
     // SAFETY: By definition of `disposed`, `#reason` is defined.
     return browser.#reason!;
   })
   async close(): Promise<void> {
     await this.#session.send('browser.close', {});
-    this.#reason = `Browser has already closed.`;
-    this.emit('closed', {reason: this.#reason});
-    this.removeAllListeners();
+    this.dispose(`Browser has already closed.`);
   }
 
   @throwIfDisposed((browser: Browser) => {

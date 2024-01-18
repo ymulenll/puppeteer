@@ -6,46 +6,95 @@
 
 import * as Bidi from 'chromium-bidi/lib/cjs/protocol/protocol.js';
 
-import type {WaitForTargetOptions} from '../api/Browser.js';
-import {BrowserContext} from '../api/BrowserContext.js';
+import {BrowserEvent, type WaitForTargetOptions} from '../api/Browser.js';
+import {BrowserContext, BrowserContextEvent} from '../api/BrowserContext.js';
 import type {Page} from '../api/Page.js';
 import type {Target} from '../api/Target.js';
 import {UnsupportedOperation} from '../common/Errors.js';
 import type {Viewport} from '../common/Viewport.js';
+import {strongWeakRef} from '../util/WeakProxy.js';
 
 import type {BidiBrowser} from './Browser.js';
-import type {BidiConnection} from './Connection.js';
 import type {BidiPage} from './Page.js';
+import {BiDiPageTarget} from './Target.js';
+import type {BrowsingContext} from './core/BrowsingContext.js';
+import type {UserContext} from './core/UserContext.js';
 
 /**
  * @internal
  */
 export interface BidiBrowserContextOptions {
   defaultViewport: Viewport | null;
-  isDefault: boolean;
 }
 
 /**
  * @internal
  */
 export class BidiBrowserContext extends BrowserContext {
-  #browser: BidiBrowser;
-  #connection: BidiConnection;
-  #defaultViewport: Viewport | null;
-  #isDefault = false;
+  static from(
+    browser: BidiBrowser,
+    userContext: UserContext,
+    options: BidiBrowserContextOptions
+  ): BidiBrowserContext {
+    const browserContext = new BidiBrowserContext(
+      browser,
+      userContext,
+      options
+    );
+    browserContext.#initialize();
+    return browserContext;
+  }
 
-  constructor(browser: BidiBrowser, options: BidiBrowserContextOptions) {
+  #browser: BidiBrowser;
+  #userContext: () => UserContext;
+  #defaultViewport: Viewport | null;
+  #pageTargets = new WeakMap<BrowsingContext, BiDiPageTarget>();
+
+  private constructor(
+    browser: BidiBrowser,
+    userContext: UserContext,
+    options: BidiBrowserContextOptions
+  ) {
     super();
     this.#browser = browser;
-    this.#connection = this.#browser.connection;
+    this.#userContext = strongWeakRef(
+      userContext,
+      `Browsing context no longer exists.`
+    );
     this.#defaultViewport = options.defaultViewport;
-    this.#isDefault = options.isDefault;
+  }
+
+  #initialize() {
+    const userContext = this.#userContext();
+    userContext.on('browsingcontext', ({browsingContext}) => {
+      const target = new BiDiPageTarget(this, browsingContext);
+      this.#pageTargets.set(browsingContext, target);
+      this.emit(BrowserContextEvent.TargetCreated, target);
+      this.browser().emit(BrowserEvent.TargetCreated, target);
+
+      browsingContext.on('destroyed', () => {
+        this.#pageTargets.delete(browsingContext);
+        this.emit(BrowserContextEvent.TargetDestroyed, target);
+        this.browser().emit(BrowserEvent.TargetDestroyed, target);
+      });
+    });
+    for (const browsingContext of userContext.browsingContexts) {
+      userContext.emit('browsingcontext', {browsingContext});
+    }
   }
 
   override targets(): Target[] {
-    return this.#browser.targets().filter(target => {
-      return target.browserContext() === this;
-    });
+    return [...this.#userContext().browsingContexts]
+      .map(
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Set
+        // up by the listeners in `#initialize`.
+        browsingContext => {
+          return this.#pageTargets.get(browsingContext)!;
+        }
+      )
+      .flatMap(target => {
+        return [target, target.bidiPage.targets()];
+      });
   }
 
   override waitForTarget(
@@ -57,22 +106,14 @@ export class BidiBrowserContext extends BrowserContext {
     }, options);
   }
 
-  get connection(): BidiConnection {
-    return this.#connection;
-  }
-
   override async newPage(): Promise<Page> {
-    const {result} = await this.#connection.send('browsingContext.create', {
-      type: Bidi.BrowsingContext.CreateType.Tab,
-    });
-    const target = this.#browser._getTargetById(result.context);
+    const browsingContext = await this.#userContext().createBrowsingContext(
+      Bidi.BrowsingContext.CreateType.Tab
+    );
 
-    // TODO: once BiDi has some concept matching BrowserContext, the newly
-    // created contexts should get automatically assigned to the right
-    // BrowserContext. For now, we assume that only explicitly created pages go
-    // to the current BrowserContext. Otherwise, the contexts get assigned to
-    // the default BrowserContext by the Browser.
-    target._setBrowserContext(this);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Set
+    // up by the listeners in `#initialize`.
+    const target = this.#pageTargets.get(browsingContext)!;
 
     const page = await target.page();
     if (!page) {
@@ -90,11 +131,8 @@ export class BidiBrowserContext extends BrowserContext {
   }
 
   override async close(): Promise<void> {
-    if (this.#isDefault) {
-      throw new Error('Default context cannot be closed!');
-    }
-
-    await this.#browser._closeContext(this);
+    // TODO: implement incognito context https://github.com/w3c/webdriver-bidi/issues/289.
+    return;
   }
 
   override browser(): BidiBrowser {
@@ -102,18 +140,18 @@ export class BidiBrowserContext extends BrowserContext {
   }
 
   override async pages(): Promise<BidiPage[]> {
-    const results = await Promise.all(
-      [...this.targets()].map(t => {
-        return t.page();
-      })
+    return [...this.#userContext().browsingContexts].map(
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Set
+      // up by the listeners in `#initialize`.
+      browsingContext => {
+        return this.#pageTargets.get(browsingContext)!.bidiPage;
+      }
     );
-    return results.filter((p): p is BidiPage => {
-      return p !== null;
-    });
   }
 
   override isIncognito(): boolean {
-    return !this.#isDefault;
+    // TODO: implement incognito context https://github.com/w3c/webdriver-bidi/issues/289.
+    return false;
   }
 
   override overridePermissions(): never {

@@ -119,6 +119,15 @@ export class Session
     return this.#info.capabilities;
   }
 
+  dispose(reason?: string): void {
+    if (this.disposed) {
+      return;
+    }
+    this.#reason = reason ?? 'Session was disposed.';
+    this.emit('ended', {reason: this.#reason});
+    this.removeAllListeners();
+  }
+
   pipeTo<Events extends BidiEvents>(emitter: EventEmitter<Events>): void {
     this.#connection.pipeTo(emitter);
   }
@@ -157,8 +166,6 @@ export class Session
   })
   async end(): Promise<void> {
     await this.send('session.end', {});
-    this.#reason = `Session (${this.id}) has already ended.`;
-    this.emit('ended', {reason: this.#reason});
-    this.removeAllListeners();
+    this.dispose(`Session (${this.id}) has already ended.`);
   }
 }
