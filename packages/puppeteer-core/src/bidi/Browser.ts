@@ -27,6 +27,7 @@ import {BrowsingContext, BrowsingContextEvent} from './BrowsingContext.js';
 import type {BidiConnection} from './Connection.js';
 import type {Browser as BrowserCore} from './core/Browser.js';
 import {Session} from './core/Session.js';
+import type {UserContext} from './core/UserContext.js';
 import {
   BiDiBrowserTarget,
   BiDiBrowsingContextTarget,
@@ -95,9 +96,8 @@ export class BidiBrowser extends Browser {
   #closeCallback?: BrowserCloseCallback;
   #browserCore: BrowserCore;
   #defaultViewport: Viewport | null;
-  #defaultContext: BidiBrowserContext;
   #targets = new Map<string, BidiTarget>();
-  #contexts: BidiBrowserContext[] = [];
+  #userContexts = new WeakMap<UserContext, BidiBrowserContext>();
   #browserTarget: BiDiBrowserTarget;
 
   #connectionEventHandlers = new Map<
@@ -117,15 +117,17 @@ export class BidiBrowser extends Browser {
     this.#closeCallback = opts.closeCallback;
     this.#browserCore = browserCore;
     this.#defaultViewport = opts.defaultViewport;
-    this.#defaultContext = new BidiBrowserContext(this, {
-      defaultViewport: this.#defaultViewport,
-      isDefault: true,
-    });
-    this.#browserTarget = new BiDiBrowserTarget(this.#defaultContext);
-    this.#contexts.push(this.#defaultContext);
+    this.#browserTarget = new BiDiBrowserTarget(this);
   }
 
   #initialize() {
+    this.#userContexts.set(
+      this.#browserCore.defaultUserContext,
+      new BidiBrowserContext(this, this.#browserCore.defaultUserContext, {
+        defaultViewport: this.#defaultViewport,
+      })
+    );
+
     this.#browserCore.once('disconnect', () => {
       this.emit(BrowserEvent.Disconnected, undefined);
     });
@@ -255,13 +257,12 @@ export class BidiBrowser extends Browser {
   override async createIncognitoBrowserContext(
     _options?: BrowserContextOptions
   ): Promise<BidiBrowserContext> {
-    // TODO: implement incognito context https://github.com/w3c/webdriver-bidi/issues/289.
-    const context = new BidiBrowserContext(this, {
+    const userContext = await this.#browserCore.createUserContext();
+    const browserContext = new BidiBrowserContext(this, userContext, {
       defaultViewport: this.#defaultViewport,
-      isDefault: false,
     });
-    this.#contexts.push(context);
-    return context;
+    this.#userContexts.set(userContext, browserContext);
+    return browserContext;
   }
 
   override async version(): Promise<string> {
@@ -269,28 +270,17 @@ export class BidiBrowser extends Browser {
   }
 
   override browserContexts(): BidiBrowserContext[] {
-    // TODO: implement incognito context https://github.com/w3c/webdriver-bidi/issues/289.
-    return this.#contexts;
-  }
-
-  async _closeContext(browserContext: BidiBrowserContext): Promise<void> {
-    this.#contexts = this.#contexts.filter(c => {
-      return c !== browserContext;
+    return [...this.#browserCore.userContexts].map(context => {
+      return this.#userContexts.get(context)!;
     });
-    for (const target of browserContext.targets()) {
-      const page = await target?.page();
-      await page?.close().catch(error => {
-        debugError(error);
-      });
-    }
   }
 
   override defaultBrowserContext(): BidiBrowserContext {
-    return this.#defaultContext;
+    return this.#userContexts.get(this.#browserCore.defaultUserContext)!;
   }
 
   override newPage(): Promise<Page> {
-    return this.#defaultContext.newPage();
+    return this.defaultBrowserContext().newPage();
   }
 
   override targets(): Target[] {

@@ -33,6 +33,13 @@ export class UserContext extends EventEmitter<{
     /** The new browsing context. */
     browsingContext: BrowsingContext;
   };
+  /**
+   * Emitted when the user context is destroyed.
+   */
+  destroyed: {
+    /** The user context that was destroyed. */
+    userContext: UserContext;
+  };
 }> {
   static create(browser: Browser, id: string): UserContext {
     const context = new UserContext(browser, id);
@@ -43,8 +50,6 @@ export class UserContext extends EventEmitter<{
   // keep-sorted start
   // Note these are only top-level contexts.
   readonly #browsingContexts = new Map<string, BrowsingContext>();
-  // @ts-expect-error -- TODO: This will be used once the WebDriver BiDi
-  // protocol supports it.
   readonly #id: string;
   readonly browser: Browser;
   // keep-sorted end
@@ -91,6 +96,9 @@ export class UserContext extends EventEmitter<{
   get browsingContexts(): Iterable<BrowsingContext> {
     return this.#browsingContexts.values();
   }
+  get id(): string {
+    return this.#id;
+  }
   // keep-sorted end
 
   async createBrowsingContext(
@@ -115,11 +123,9 @@ export class UserContext extends EventEmitter<{
     return browsingContext;
   }
 
-  async close(): Promise<void> {
-    const promises = [];
-    for (const browsingContext of this.#browsingContexts.values()) {
-      promises.push(browsingContext.close());
-    }
-    await Promise.all(promises);
+  async remove(): Promise<void> {
+    // TODO: Call `removeUserContext` once available.
+    this.emit('destroyed', {userContext: this});
+    this.removeAllListeners();
   }
 }

@@ -63,7 +63,7 @@ export class Browser extends EventEmitter<{
     this.session = session;
     // keep-sorted end
 
-    this.#userContexts.set('', UserContext.create(this, ''));
+    this.#userContexts.set('default', UserContext.create(this, 'default'));
   }
 
   async #initialize() {
@@ -186,5 +186,20 @@ export class Browser extends EventEmitter<{
     await this.#session.send('script.removePreloadScript', {
       script,
     });
+  }
+
+  async createUserContext(): Promise<UserContext> {
+    // TODO: implement incognito context https://github.com/w3c/webdriver-bidi/issues/289.
+    // TODO: Call `createUserContext` once available.
+    // Generating a random ID for now.
+    const id = `${Math.ceil(Math.random() * 100000000)}`;
+
+    const userContext = UserContext.create(this, id);
+    userContext.once('destroyed', () => {
+      this.#userContexts.delete(id);
+    });
+
+    this.#userContexts.set(userContext.id, userContext);
+    return userContext;
   }
 }
