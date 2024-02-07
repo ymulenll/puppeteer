@@ -210,8 +210,6 @@ export class BrowsingContext extends EventEmitter<{
       }
       this.#url = info.url;
 
-      this.#requests.clear();
-
       // Note the navigation ID is null for this event.
       this.#navigation = Navigation.from(this);
 
@@ -232,10 +230,10 @@ export class BrowsingContext extends EventEmitter<{
       if (event.context !== this.id) {
         return;
       }
+      // Means the request is a redirect. This is handled in Request.
       if (this.#requests.has(event.request.request)) {
         return;
       }
-
       const request = Request.from(this, event);
       this.#requests.set(request.id, request);
       this.emit('request', {request});
@@ -353,16 +351,11 @@ export class BrowsingContext extends EventEmitter<{
   async navigate(
     url: string,
     wait?: Bidi.BrowsingContext.ReadinessState
-  ): Promise<Navigation> {
+  ): Promise<void> {
     await this.#session.send('browsingContext.navigate', {
       context: this.id,
       url,
       wait,
-    });
-    return await new Promise(resolve => {
-      this.once('navigation', ({navigation}) => {
-        resolve(navigation);
-      });
     });
   }
 
@@ -370,15 +363,10 @@ export class BrowsingContext extends EventEmitter<{
     // SAFETY: Disposal implies this exists.
     return context.#reason!;
   })
-  async reload(options: ReloadOptions = {}): Promise<Navigation> {
+  async reload(options: ReloadOptions = {}): Promise<void> {
     await this.#session.send('browsingContext.reload', {
       context: this.id,
       ...options,
-    });
-    return await new Promise(resolve => {
-      this.once('navigation', ({navigation}) => {
-        resolve(navigation);
-      });
     });
   }
 

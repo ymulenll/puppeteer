@@ -43,7 +43,7 @@ export class Navigation extends EventEmitter<{
   #request: Request | undefined;
   readonly #browsingContext: BrowsingContext;
   readonly #disposables = new DisposableStack();
-  readonly #id = new Deferred<string>();
+  readonly #id = new Deferred<string | null>();
   // keep-sorted end
 
   private constructor(context: BrowsingContext) {
@@ -65,11 +65,20 @@ export class Navigation extends EventEmitter<{
       this.dispose();
     });
 
-    this.#browsingContext.on('request', ({request}) => {
-      if (request.navigation === this.#id.value()) {
-        this.#request = request;
-        this.emit('request', request);
+    browsingContextEmitter.on('request', ({request}) => {
+      if (request.navigation === undefined || this.#request !== undefined) {
+        return;
       }
+      // If a request with a navigation ID comes in, then the navigation ID is
+      // for this navigation.
+      if (!this.#id.resolved()) {
+        this.#id.resolve(request.navigation);
+      }
+      if (this.#id.value() !== request.navigation) {
+        return;
+      }
+      this.#request = request;
+      this.emit('request', request);
     });
 
     const sessionEmitter = this.#disposables.use(
@@ -84,7 +93,7 @@ export class Navigation extends EventEmitter<{
         if (info.context !== this.#browsingContext.id) {
           return;
         }
-        if (!info.navigation) {
+        if (info.navigation === null) {
           return;
         }
         if (!this.#id.resolved()) {
@@ -102,9 +111,9 @@ export class Navigation extends EventEmitter<{
         if (info.context !== this.#browsingContext.id) {
           return;
         }
-        if (!info.navigation) {
-          return;
-        }
+
+        // Note we don't check if `navigation` is null since `null` means the
+        // fragment navigated.
         if (!this.#id.resolved()) {
           this.#id.resolve(info.navigation);
         }
