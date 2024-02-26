@@ -20,6 +20,13 @@ All notable changes to this project will be documented in this file. See [standa
   * dependencies
     * @puppeteer/browsers bumped from 1.5.1 to 1.6.0
 
+## [22.4.0](https://github.com/puppeteer/puppeteer/compare/puppeteer-core-v22.3.0...puppeteer-core-v22.4.0) (2024-02-26)
+
+
+### Features
+
+* implement ElementHandle.uploadFile for WebDriver BiDi ([#11963](https://github.com/puppeteer/puppeteer/issues/11963)) ([accf2b6](https://github.com/puppeteer/puppeteer/commit/accf2b6ca84c93bc700277b4e3382d894fb45a76))
+
 ## [22.3.0](https://github.com/puppeteer/puppeteer/compare/puppeteer-core-v22.2.0...puppeteer-core-v22.3.0) (2024-02-25)
 
 
